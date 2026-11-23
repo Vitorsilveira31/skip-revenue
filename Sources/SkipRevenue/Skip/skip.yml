@@ -11,4 +11,4 @@ build:
   contents:
     - block: 'dependencies'
       contents:
-        - 'implementation("com.revenuecat.purchases:purchases:9.19.0")'
+        - 'implementation("com.revenuecat.purchases:purchases:11.4.3")'
