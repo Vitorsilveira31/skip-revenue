@@ -147,13 +147,18 @@ public struct RevenueCatFuse: @unchecked Sendable {
     }
 
     public func loginUser(userId: String) async throws {
+        let generation = Self.state.generation
         _ = try await Self.invoke("changeUser", JSON.object([JSONField("appUserId", userId)]))
+        // A configuration made while the change was on its way owns the identity now.
+        guard generation == Self.state.generation else { return }
         Self.state.appUserID = userId
         Self.state.anonymous = false
     }
 
     public func logoutUser() async throws {
+        let generation = Self.state.generation
         let reply = try await Self.invoke("logout")
+        guard generation == Self.state.generation else { return }
         Self.state.appUserID = reply["appUserId"] as? String ?? ""
         Self.state.anonymous = true
     }
@@ -244,6 +249,7 @@ public struct RevenueCatFuse: @unchecked Sendable {
     /// Calls the page service and returns its answer, or throws the `StoreError` it names.
     private static func invoke(_ method: String, _ payload: String = "{}") async throws -> [String: Any] {
         guard state.configured else { throw state.failure ?? StoreError.notConfigured }
+        let generation = state.generation
         let text: String
         do {
             text = try await service.call(method, payload)
@@ -252,8 +258,9 @@ public struct RevenueCatFuse: @unchecked Sendable {
         }
         guard let reply = WebJSON.object(text) else { throw StoreError.unknown }
         if let kind = reply["error"] as? String {
-            // A change of user that failed after purchases-js switched identities: the state follows the SDK.
-            if let id = reply["appUserId"] as? String {
+            // A change of user that failed after purchases-js switched identities: the state follows the SDK, unless a
+            // newer configuration was made meanwhile (it owns the identity then).
+            if let id = reply["appUserId"] as? String, generation == state.generation {
                 state.appUserID = id
                 state.anonymous = id.hasPrefix("$RCAnonymousID:")
             }
