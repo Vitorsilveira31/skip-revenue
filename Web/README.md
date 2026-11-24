@@ -5,24 +5,22 @@ With SwiftUIWeb's Embedded build (`SWIFTUIWEB_EMBEDDED`), `import SkipRevenue` r
 whose checkout takes the payment through Stripe. Swift calls the page service in `Resources/skip-revenue.js`, which
 drives RevenueCat's purchases-js SDK (`globalThis.Purchases`).
 
+The browser files ship with this package, in `Web/Resources/`: `skip-revenue.js`, purchases-js' UMD bundle
+(`purchases.js`, `@revenuecat/purchases-js` 1.74.0, `dist/Purchases.umd.js` as published on npm) and `head.html`, which
+loads `skip-revenue.js`, deferred. SwiftUIWeb's browser build copies a local package dependency's `Web/Resources/` into
+the application's bundle and puts its `head.html` before the application's, so an application keeps no copies.
+purchases-js (about 1 MB) is not loaded with the page: the service adds its script the first time RevenueCat is
+configured. Set `SkipRevenueWeb.sdkURL` before that to load it from another path; a page that loads purchases-js itself
+(`globalThis.Purchases`) is used as it is.
+
 An application:
 
-1. Copies purchases-js' UMD bundle (`dist/Purchases.umd.js` of `@revenuecat/purchases-js`, version pinned) as
-   `purchases.js` and `Resources/skip-revenue.js` into its own `Web/Resources`, so `script-src 'self'` allows them.
-2. Loads `skip-revenue.js` from `head.html`, deferred, before the app starts:
-
-   ```html
-   <script defer src="./skip-revenue.js"></script>
-   ```
-
-   purchases-js (about 1 MB) is not loaded with the page: the service adds its script the first time RevenueCat is
-   configured. Set `SkipRevenueWeb.sdkURL` before that to load it from another path; a page that loads purchases-js
-   itself (`globalThis.Purchases`) is used as it is.
-
-3. Allows Stripe and RevenueCat in its Content-Security-Policy when it restricts them: the checkout loads Stripe.js
+1. Depends on this package through a local path in its browser manifest (`.package(path: "../skip-revenue")`).
+2. Allows Stripe and RevenueCat in its Content-Security-Policy when it declares its own (the page has one policy, the
+   application's): the checkout loads Stripe.js
    (`script-src https://js.stripe.com`, `frame-src https://js.stripe.com https://hooks.stripe.com`) and calls
    `https://api.revenuecat.com` and `https://api.stripe.com` (`connect-src`).
-4. Configures with the Web Billing app's public API key (`rcb_…`, from RevenueCat's dashboard) and the app user id:
+3. Configures with the Web Billing app's public API key (`rcb_…`, from RevenueCat's dashboard) and the app user id:
    `RevenueCatFuse.shared.configure(apiKey: key, appUserID: accountID)`.
 
 The checkout follows the browser's language (`navigator.language`, then `<html lang>`); purchases-js ships Portuguese
