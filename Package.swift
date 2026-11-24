@@ -36,10 +36,28 @@ let package = Package(
     ]
 )
 
+// The browser build of SwiftUIWeb (https://github.com/Vitorsilveira31/SwiftUIWeb) sets SWIFTUIWEB_EMBEDDED. There the
+// same `SkipRevenue` product is a web implementation (Sources/SkipRevenueWeb) on RevenueCat Web Billing: it drives
+// RevenueCat's purchases-js SDK (Stripe checkout) through a SwiftUIWeb page service (Web/Resources/skip-revenue.js), so
+// code that imports SkipRevenue builds for iOS, Android and the web. SkipRevenueUI (the native paywalls) has no web
+// counterpart.
+let webBuild = Context.environment["SWIFTUIWEB_EMBEDDED"] != nil
+if webBuild {
+    package.platforms = nil
+    package.products = [.library(name: "SkipRevenue", targets: ["SkipRevenue"])]
+    package.dependencies = [.package(url: "https://github.com/Vitorsilveira31/SwiftUIWeb.git", from: "0.1.40")]
+    package.targets = [
+        .target(name: "SkipRevenue", dependencies: [
+            .product(name: "SwiftUIWebBrowserIO", package: "swiftuiweb"),
+            .product(name: "WebFoundation", package: "swiftuiweb"),
+        ], path: "Sources/SkipRevenueWeb"),
+    ]
+}
+
 // SKIP_DYNAMIC_LIBRARIES and SKIP_BRIDGE both enforce building as dynamic
 // libraries; SKIP_BRIDGE additionally puts the skipstone plugin in bridge mode
-let bridgeMode = (Context.environment["SKIP_BRIDGE"] ?? "0") != "0"
-let forceDylib = bridgeMode || (Context.environment["SKIP_DYNAMIC_LIBRARIES"] ?? "0") != "0"
+let bridgeMode = !webBuild && (Context.environment["SKIP_BRIDGE"] ?? "0") != "0"
+let forceDylib = bridgeMode || (!webBuild && (Context.environment["SKIP_DYNAMIC_LIBRARIES"] ?? "0") != "0")
 
 if bridgeMode {
     // Match skip-firebase's bridge configuration: depend on skip-fuse (modern
