@@ -19,12 +19,17 @@
     loading ??= new Promise((resolve) => {
       const script = document.createElement("script");
       script.src = globalThis.SkipRevenueWeb.sdkURL ?? "./purchases.js";
-      script.onload = () => resolve(sdk());
-      script.onerror = () => {
-        loading = null;
-        resolve(undefined);
+      const done = () => {
+        script.onload = script.onerror = null;
+        resolve(sdk());
       };
+      script.onload = done;
+      script.onerror = done;
       document.head.appendChild(script);
+    }).then((loaded) => {
+      // A script that failed, or ran without defining purchases-js, is loaded again by the next configure.
+      if (!loaded?.Purchases) loading = null;
+      return loaded;
     });
     return loading;
   };
@@ -84,23 +89,25 @@
           const { apiKey, appUserId } = parse(payload);
           const Purchases = (await loadSDK())?.Purchases;
           if (!Purchases) throw fail("unavailable", "purchases-js could not be loaded");
-          purchases?.close();
-          purchases = null;
+          // purchases-js checks the key and the user before it replaces its instance (and closes the previous one's
+          // checkout itself): a refused configuration leaves the session in use as it was.
+          const next = Purchases.configure({ apiKey, appUserId: appUserId ?? anonymousID() });
+          purchases = next;
           packages.clear();
-          purchases = Purchases.configure({ apiKey, appUserId: appUserId ?? anonymousID() });
           return { appUserId: purchases.getAppUserId() };
         }),
 
         changeUser: (payload) => serial(async () => {
           const { appUserId } = parse(payload);
+          const info = await configured().changeUser(appUserId);
           packages.clear();
-          return { appUserId, customerInfo: customer(await configured().changeUser(appUserId)) };
+          return { appUserId, customerInfo: customer(info) };
         }),
 
         logout: () => serial(async () => {
           const appUserId = anonymousID();
-          packages.clear();
           await configured().changeUser(appUserId);
+          packages.clear();
           return { appUserId };
         }),
 

@@ -214,20 +214,32 @@ public struct RevenueCatFuse: @unchecked Sendable {
         Self.state.anonymous = appUserID == nil
         var fields = [JSONField("apiKey", apiKey)]
         if let appUserID { fields.append(JSONField("appUserId", appUserID)) }
+        Self.state.failure = nil
         _ = Self.service.call("configure", JSON.object(fields)) { result in
-            // An anonymous configuration learns the id purchases-js generated.
-            guard case .success(let text) = result, let reply = WebJSON.object(text) else { return }
-            if reply["error"] != nil {
-                Self.state.configured = false
+            // An anonymous configuration learns the id purchases-js generated; a failed one is remembered, so later
+            // calls report why (purchases-js did not load, the key was refused) rather than a missing configure.
+            guard case .success(let text) = result, let reply = WebJSON.object(text) else {
+                Self.failConfiguration(.unknown)
+                return
+            }
+            if let kind = reply["error"] as? String {
+                Self.failConfiguration(StoreError(webKind: kind))
             } else if let id = reply["appUserId"] as? String {
                 Self.state.appUserID = id
             }
         }
     }
 
+    private static func failConfiguration(_ error: StoreError) {
+        state.configured = false
+        state.appUserID = ""
+        state.anonymous = true
+        state.failure = error
+    }
+
     /// Calls the page service and returns its answer, or throws the `StoreError` it names.
     private static func invoke(_ method: String, _ payload: String = "{}") async throws -> [String: Any] {
-        guard state.configured else { throw StoreError.notConfigured }
+        guard state.configured else { throw state.failure ?? StoreError.notConfigured }
         let text: String
         do {
             text = try await service.call(method, payload)
@@ -245,6 +257,8 @@ private final class WebState: @unchecked Sendable {
     var configured = false
     var appUserID = ""
     var anonymous = true
+    /// Why the last configuration failed (nil when none did).
+    var failure: StoreError?
 }
 
 /// Reading the page service's answers: JSON values as WebFoundation's JSONSerialization returns them.

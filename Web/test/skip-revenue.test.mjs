@@ -60,6 +60,14 @@ test("registers the skip-revenue service, and every call before configure names 
   expect(await answer("customerInfo")).toEqual({ error: "notConfigured", message: "RevenueCat is not configured" });
 });
 
+test("a first script that ran without defining purchases-js is loaded again on the next configure", async () => {
+  const appendChild = document.head.appendChild;
+  document.head.appendChild = (script) => { added.push(script.src); script.onload(); };
+  expect((await answer("configure", { apiKey: "rcb_public", appUserId: "user-1" })).error).toBe("unavailable");
+  document.head.appendChild = appendChild;
+  added.length = 0;
+});
+
 test("configures the account, lists the current offering's packages and buys one in the page's language", async () => {
   expect(await answer("configure", { apiKey: "rcb_public", appUserId: "user-1" })).toEqual({ appUserId: "user-1" });
   expect(added).toEqual(["./purchases.js"]);
@@ -90,6 +98,23 @@ test("a closed checkout is userCancelled; an unknown package is packageNotFound"
   expect((await answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_annual" })).error).toBe("packageNotFound");
 });
 
+test("a refused configuration keeps the session in use, and a failed change of user keeps its packages", async () => {
+  await answer("products", {});
+  const configure = StandIn.configure;
+  StandIn.configure = () => { throw new Error("Invalid API key"); };
+  expect((await answer("configure", { apiKey: "bad", appUserId: "user-2" })).error).toBe("unknown");
+  StandIn.configure = configure;
+  expect((await answer("customerInfo")).customerInfo.originalAppUserId).toBe("user-1");
+  const changeUser = StandIn.prototype.changeUser;
+  StandIn.prototype.changeUser = async () => { throw new Error("network"); };
+  expect((await answer("changeUser", { appUserId: "user-3" })).error).toBe("unknown");
+  StandIn.prototype.changeUser = changeUser;
+  const bought = answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_monthly" });
+  await Bun.sleep(0);
+  checkout.resolve();
+  expect((await bought).customerInfo.originalAppUserId).toBe("user-1");
+});
+
 test("a change of user waits for the open checkout, and drops the packages loaded for the previous user", async () => {
   await answer("products", {});
   const bought = answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_monthly" });
@@ -101,3 +126,4 @@ test("a change of user waits for the open checkout, and drops the packages loade
   expect(await loggedOut).toEqual({ appUserId: "$RCAnonymousID:0123" });
   expect((await answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_monthly" })).error).toBe("packageNotFound");
 });
+
