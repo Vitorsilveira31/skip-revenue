@@ -209,6 +209,9 @@ public struct RevenueCatFuse: @unchecked Sendable {
     }
 
     private func start(apiKey: String, appUserID: String?) {
+        // Only the latest configuration's answer counts: an earlier one that fails later changes nothing.
+        Self.state.generation += 1
+        let generation = Self.state.generation
         Self.state.configured = true
         Self.state.appUserID = appUserID ?? ""
         Self.state.anonymous = appUserID == nil
@@ -218,6 +221,7 @@ public struct RevenueCatFuse: @unchecked Sendable {
         _ = Self.service.call("configure", JSON.object(fields)) { result in
             // An anonymous configuration learns the id purchases-js generated; a failed one is remembered, so later
             // calls report why (purchases-js did not load, the key was refused) rather than a missing configure.
+            guard generation == Self.state.generation else { return }
             guard case .success(let text) = result, let reply = WebJSON.object(text) else {
                 Self.failConfiguration(.unknown)
                 return
@@ -247,7 +251,14 @@ public struct RevenueCatFuse: @unchecked Sendable {
             throw StoreError.unknown
         }
         guard let reply = WebJSON.object(text) else { throw StoreError.unknown }
-        if let kind = reply["error"] as? String { throw StoreError(webKind: kind) }
+        if let kind = reply["error"] as? String {
+            // A change of user that failed after purchases-js switched identities: the state follows the SDK.
+            if let id = reply["appUserId"] as? String {
+                state.appUserID = id
+                state.anonymous = id.hasPrefix("$RCAnonymousID:")
+            }
+            throw StoreError(webKind: kind)
+        }
         return reply
     }
 }
@@ -259,6 +270,8 @@ private final class WebState: @unchecked Sendable {
     var anonymous = true
     /// Why the last configuration failed (nil when none did).
     var failure: StoreError?
+    /// Counts configurations; only the latest one's answer is applied.
+    var generation = 0
 }
 
 /// Reading the page service's answers: JSON values as WebFoundation's JSONSerialization returns them.

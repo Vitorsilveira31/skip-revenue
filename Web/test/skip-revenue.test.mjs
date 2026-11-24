@@ -12,7 +12,8 @@ const offering = {
       identifier: "noveloplus.premium.monthly",
       title: "Premium",
       description: null,
-      currentPrice: { amount: 19.9, amountMicros: 19900000, currency: "BRL", formattedPrice: "R$ 19,90" },
+      // As purchases-js gives it: amount in cents (deprecated), amountMicros in millionths.
+      currentPrice: { amount: 1990, amountMicros: 19900000, currency: "BRL", formattedPrice: "R$ 19,90" },
     },
   }],
 };
@@ -127,3 +128,28 @@ test("a change of user waits for the open checkout, and drops the packages loade
   expect((await answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_monthly" })).error).toBe("packageNotFound");
 });
 
+
+test("a Chinese browser gets the checkout's Chinese by script", async () => {
+  await answer("configure", { apiKey: "rcb_public", appUserId: "user-5" });
+  await answer("products", {});
+  for (const [tag, expected] of [["zh-TW", "zh_Hant"], ["zh-CN", "zh_Hans"], ["zh-Hant-HK", "zh_Hant"]]) {
+    Object.defineProperty(globalThis, "navigator", { value: { language: tag }, configurable: true });
+    const bought = answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_monthly" });
+    await Bun.sleep(0);
+    checkout.resolve();
+    await bought;
+    expect(calls.at(-1)).toEqual(["purchase", "user-5", "$rc_monthly", expected]);
+  }
+  Object.defineProperty(globalThis, "navigator", { value: { language: "pt-BR" }, configurable: true });
+});
+
+test("a change of user that fails after the SDK switched names the identity in use and drops the packages", async () => {
+  await answer("products", {});
+  const changeUser = StandIn.prototype.changeUser;
+  StandIn.prototype.changeUser = async function (id) { this.user = id; throw new Error("customer info failed"); };
+  const failed = await answer("changeUser", { appUserId: "user-6" });
+  StandIn.prototype.changeUser = changeUser;
+  expect(failed.error).toBe("unknown");
+  expect(failed.appUserId).toBe("user-6");
+  expect((await answer("purchase", { offeringIdentifier: "default", packageIdentifier: "$rc_monthly" })).error).toBe("packageNotFound");
+});

@@ -39,7 +39,10 @@
   const failure = (error) => {
     const cancelled = error?.errorCode !== undefined && error.errorCode === sdk()?.ErrorCode?.UserCancelledError;
     const kind = error?.kind ?? (cancelled ? "userCancelled" : "unknown");
-    return JSON.stringify({ error: kind, message: String(error?.message ?? error).slice(0, 300) });
+    const answer = { error: kind, message: String(error?.message ?? error).slice(0, 300) };
+    // A change of user can fail after purchases-js already switched identities: Swift learns which one is in use.
+    if (typeof error?.appUserId === "string") answer.appUserId = error.appUserId;
+    return JSON.stringify(answer);
   };
 
   const customer = (info) => ({
@@ -60,15 +63,21 @@
         title: product.title ?? product.displayName ?? "",
         description: product.description ?? "",
         priceString: product.currentPrice?.formattedPrice ?? "",
-        price: product.currentPrice?.amount ?? 0,
+        // amountMicros is the price in millionths of the currency (amount, deprecated, is in cents).
+        price: (product.currentPrice?.amountMicros ?? 0) / 1_000_000,
         currency: product.currentPrice?.currency ?? null,
       },
     };
   };
 
   // The checkout's language is the browser's, as an application's own strings are (SwiftUIWeb's page says lang="en"
-  // whatever the reader's language); purchases-js reads the language part: pt-BR → pt.
-  const locale = () => globalThis.navigator?.language || globalThis.document?.documentElement?.lang || "en";
+  // whatever the reader's language); purchases-js reads the language part (pt-BR → pt), but names its Chinese
+  // dictionaries by script, so a Chinese tag is mapped to zh_Hans or zh_Hant.
+  const locale = () => {
+    const tag = globalThis.navigator?.language || globalThis.document?.documentElement?.lang || "en";
+    if (!/^zh\b/i.test(tag)) return tag;
+    return /hant|-(tw|hk|mo)\b/i.test(tag) ? "zh_Hant" : "zh_Hans";
+  };
 
   (globalThis.SwiftUIWebServices ??= { queue: [], define(name, factory) { this.queue.push([name, factory]); } })
     .define("skip-revenue", () => {
@@ -83,6 +92,21 @@
       };
       const configured = () => purchases ?? (() => { throw fail("notConfigured", "RevenueCat is not configured"); })();
       const anonymousID = () => sdk().Purchases.generateRevenueCatAnonymousAppUserId();
+      // purchases-js switches the identity before it reads the new user's customer, so a failure can leave it on the new
+      // user: the loaded packages go whenever the identity changed, and the failure names the identity in use.
+      const switchUser = async (appUserId) => {
+        const instance = configured();
+        const before = instance.getAppUserId();
+        try {
+          const info = await instance.changeUser(appUserId);
+          packages.clear();
+          return info;
+        } catch (error) {
+          const now = instance.getAppUserId();
+          if (now !== before) packages.clear();
+          throw Object.assign(error instanceof Error ? error : new Error(String(error)), { appUserId: now });
+        }
+      };
 
       return {
         configure: (payload) => serial(async () => {
@@ -99,15 +123,13 @@
 
         changeUser: (payload) => serial(async () => {
           const { appUserId } = parse(payload);
-          const info = await configured().changeUser(appUserId);
-          packages.clear();
+          const info = await switchUser(appUserId);
           return { appUserId, customerInfo: customer(info) };
         }),
 
         logout: () => serial(async () => {
           const appUserId = anonymousID();
-          await configured().changeUser(appUserId);
-          packages.clear();
+          await switchUser(appUserId);
           return { appUserId };
         }),
 

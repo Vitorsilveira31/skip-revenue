@@ -6,7 +6,8 @@ whose checkout takes the payment through Stripe. Swift calls the page service in
 drives RevenueCat's purchases-js SDK (`globalThis.Purchases`).
 
 The browser files ship with this package, in `Web/Resources/`: `skip-revenue.js`, purchases-js' UMD bundle
-(`purchases.js`, `@revenuecat/purchases-js` 1.74.0, `dist/Purchases.umd.js` as published on npm) and `head.html`, which
+(`purchases.js`, `@revenuecat/purchases-js` 1.74.0, `dist/Purchases.umd.js` as published on npm, with its MIT license in
+`purchases-js.LICENSE`) and `head.html`, which
 loads `skip-revenue.js`, deferred. SwiftUIWeb's browser build copies a local package dependency's `Web/Resources/` into
 the application's bundle and puts its `head.html` before the application's, so an application keeps no copies.
 purchases-js (about 1 MB) is not loaded with the page: the service adds its script the first time RevenueCat is
@@ -19,7 +20,8 @@ An application:
 2. Allows Stripe and RevenueCat in its Content-Security-Policy when it declares its own (the page has one policy, the
    application's): the checkout loads Stripe.js
    (`script-src https://js.stripe.com`, `frame-src https://js.stripe.com https://hooks.stripe.com`) and calls
-   `https://api.revenuecat.com` and `https://api.stripe.com` (`connect-src`).
+   `https://api.revenuecat.com` and `https://api.stripe.com` (`connect-src`). purchases-js also adds `<style>` elements
+   for its checkout overlay, so the policy keeps `style-src 'unsafe-inline'`, as SwiftUIWeb's default policy does.
 3. Configures with the Web Billing app's public API key (`rcb_…`, from RevenueCat's dashboard) and the app user id:
    `RevenueCatFuse.shared.configure(apiKey: key, appUserID: accountID)`.
 
